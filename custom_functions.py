@@ -1,9 +1,61 @@
+## Import necessary packages
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from io import StringIO
+import plotly.express as px
+import numpy as np
+import re
+import spacy
+import nltk
+import itertools
+
+# WordCloud
+from wordcloud import WordCloud
+from wordcloud import STOPWORDS
+
+# NLTK
+from nltk.tokenize import word_tokenize
+from nltk.tokenize import TweetTokenizer
+from nltk import ngrams
+from nltk.probability import FreqDist
+from nltk.stem import PorterStemmer
+from nltk.stem import WordNetLemmatizer
+
+# Tensorflow
+from tensorflow.keras.layers import TextVectorization
+from tensorflow.keras import layers
+from tensorflow.keras import optimizers
+
+# Sklearn
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline, Pipeline
+from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing import LabelEncoder
+from sklearn import set_config
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn import metrics
+from sklearn.metrics import classification_report, ConfusionMatrixDisplay
+
+# UnderSampling
+from imblearn.under_sampling import RandomUnderSampler
+
+set_config(transform_output='pandas')
+pd.set_option('display.max_colwidth', 250)
+pd.set_option('display.max_colwidth',300)
+
+# Create the TextVectorization layer
+count_vectorizer = tf.keras.layers.TextVectorization(
+    standardize="lower_and_strip_punctuation",
+    output_mode="count")
+
+
 # Classification Metrics
 
 ## PREVIOUS CLASSIFICATION_METRICS FUNCTION FROM INTRO TO ML
-from sklearn.metrics import classification_report, ConfusionMatrixDisplay
-import matplotlib.pyplot as plt
-import numpy as np
 def classification_metrics(y_true, y_pred, label='',
                            output_dict=False, figsize=(8,4),
                            normalize='true', cmap='Blues',
@@ -51,99 +103,79 @@ def classification_metrics(y_true, y_pred, label='',
         report_dict = classification_report(y_true, y_pred, output_dict=True)
         return report_dict
 
-# Evaluate Classification Network
-
-def evaluate_classification_network(model, 
-                                    X_train=None, y_train=None, 
-                                    X_test=None, y_test=None,
-                                    history=None, history_figsize=(6,6),
-                                    figsize=(6,4), normalize='true',
-                                    output_dict = False,
-                                    cmap_train='Blues',
-                                    cmap_test="Reds",
-                                    values_format=".2f", 
-                                    colorbar=False):
-    """Evaluates a neural network classification task using either
-    separate X and y arrays or a tensorflow Dataset
+# Advanced ML - Custom Functions - Text Classification with sklearn
+def classification_metrics(y_true, y_pred, label='',
+                           output_dict=False, figsize=(8,4),
+                           normalize='true', cmap='Blues',
+                           colorbar=False,values_format=".2f"):
+    """Modified version of classification metrics function from Intro to Machine Learning.
+    Updates:
+    - Reversed raw counts confusion matrix cmap  (so darker==more).
+    - Added arg for normalized confusion matrix values_format
+    """
+    # Get the classification report
+    report = classification_report(y_true, y_pred)
     
-    Data Args:
-        X_train (array, or Dataset)
-        y_train (array, or None if using a Dataset
-        X_test (array, or Dataset)
-        y_test (array, or None if using a Dataset)
-        history (history object)
-        """
-    # Plot history, if provided
-    if history is not None:
-        plot_history(history, figsize=history_figsize)
-    ## Adding a Print Header
-    print("\n"+'='*80)
-    print('- Evaluating Network...')
-    print('='*80)
-    ## TRAINING DATA EVALUATION
-    # check if X_train was provided
-    if X_train is not None:
-        ## Check if X_train is a dataset
-        if hasattr(X_train,'map'):
-            # If it IS a Datset:
-            # extract y_train and y_train_pred with helper function
-            y_train, y_train_pred = get_true_pred_labels(model, X_train)
-        else:
-            # Get predictions for training data
-            y_train_pred = model.predict(X_train)
-        ## Pass both y-vars through helper compatibility function
-        y_train = convert_y_to_sklearn_classes(y_train)
-        y_train_pred = convert_y_to_sklearn_classes(y_train_pred)
-        
-        # Call the helper function to obtain regression metrics for training data
-        results_train = classification_metrics(y_train, y_train_pred, 
-                                         output_dict=True, figsize=figsize,
-                                             colorbar=colorbar, cmap=cmap_train,
-                                               values_format=values_format,
-                                         label='Training Data')
-        
-        ## Run model.evaluate         
-        print("\n- Evaluating Training Data:")
-        print(model.evaluate(X_train, return_dict=True))
+    ## Print header and report
+    header = "-"*70
+    print(header, f" Classification Metrics: {label}", header, sep='\n')
+    print(report)
     
-    # If no X_train, then save empty list for results_train
-    else:
-        results_train = []
-    ## TEST DATA EVALUATION
-    # check if X_test was provided
-    if X_test is not None:
-        ## Check if X_train is a dataset
-        if hasattr(X_test,'map'):
-            # If it IS a Datset:
-            # extract y_train and y_train_pred with helper function
-            y_test, y_test_pred = get_true_pred_labels(model, X_test)
-        else:
-            # Get predictions for training data
-            y_test_pred = model.predict(X_test)
-        ## Pass both y-vars through helper compatibility function
-        y_test = convert_y_to_sklearn_classes(y_test)
-        y_test_pred = convert_y_to_sklearn_classes(y_test_pred)
-        
-        # Call the helper function to obtain regression metrics for training data
-        results_test = classification_metrics(y_test, y_test_pred, 
-                                         output_dict=True, figsize=figsize,
-                                             colorbar=colorbar, cmap=cmap_test,
-                                              values_format=values_format,
-                                         label='Test Data')
-        
-        ## Run model.evaluate         
-        print("\n- Evaluating Test Data:")
-        print(model.evaluate(X_test, return_dict=True))
-      
-    # If no X_test, then save empty list for results_test
-    else:
-        results_test = []
-      
-    # Store results in a dictionary
+    ## CONFUSION MATRICES SUBPLOTS
+    fig, axes = plt.subplots(ncols=2, figsize=figsize)
+    
+    # Create a confusion matrix  of raw counts (left subplot)
+    ConfusionMatrixDisplay.from_predictions(y_true, y_pred,
+                                            normalize=None, 
+                                            cmap='gist_gray_r',# Updated cmap
+                                            values_format="d", 
+                                            colorbar=colorbar,
+                                            ax = axes[0]);
+    axes[0].set_title("Raw Counts")
+    
+    # Create a confusion matrix with the data with normalize argument 
+    ConfusionMatrixDisplay.from_predictions(y_true, y_pred,
+                                            normalize=normalize,
+                                            cmap=cmap, 
+                                            values_format=values_format, #New arg
+                                            colorbar=colorbar,
+                                            ax = axes[1]);
+    axes[1].set_title("Normalized Confusion Matrix")
+    
+    # Adjust layout and show figure
+    fig.tight_layout()
+    plt.show()
+    
+    # Return dictionary of classification_report
+    if output_dict==True:
+        report_dict = classification_report(y_true, y_pred, output_dict=True)
+        return report_dict
+    
+    
+def evaluate_classification(model, X_train, y_train, X_test, y_test,
+                         figsize=(6,4), normalize='true', output_dict = False,
+                            cmap_train='Blues', cmap_test="Reds",colorbar=False):
+  # Get predictions for training data
+  y_train_pred = model.predict(X_train)
+  # Call the helper function to obtain regression metrics for training data
+  results_train = classification_metrics(y_train, y_train_pred, #verbose = verbose,
+                                     output_dict=True, figsize=figsize,
+                                         colorbar=colorbar, cmap=cmap_train,
+                                     label='Training Data')
+  print()
+  # Get predictions for test data
+  y_test_pred = model.predict(X_test)
+  # Call the helper function to obtain regression metrics for test data
+  results_test = classification_metrics(y_test, y_test_pred, #verbose = verbose,
+                                  output_dict=True,figsize=figsize,
+                                         colorbar=colorbar, cmap=cmap_test,
+                                    label='Test Data' )
+  if output_dict == True:
+    # Store results in a dataframe if ouput_frame is True
     results_dict = {'train':results_train,
                     'test': results_test}
-    if output_dict == True:
-        return results_dict
+    return results_dict
+
 
 
 # Plot History
@@ -616,155 +648,97 @@ def explore_numeric(df, x, figsize=(6,5) ):
 
 ## Reference: https://docs.streamlit.io/library/api-reference
 
-## Import necessary packages
-import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from io import StringIO
-import plotly.express as px
-import functions as fn
 
 
-## load_data with cahcing
-@st.cache_data
-def load_data():
-    df = pd.read_csv('../Data/loan_approval.csv')
-    return df
 
-## Use function to load Data
-df = load_data()
+# ## load_data with cahcing
+# @st.cache_data
+# def load_data():
+#     df = pd.read_csv('../Data/loan_approval.csv')
+#     return df
 
-
-## Image, title and Markdown subheader
-st.image('../Images/money_tree.jpg')
-st.title('Loan Approval Dataset')
-st.markdown("Data gathered from [Kaggle](https://www.kaggle.com/datasets/architsharma01/loan-approval-prediction-dataset)")
-
-## Display DataFrame
-st.header('Loan Approval DataFrame')
-st.dataframe(df)
+# ## Use function to load Data
+# df = load_data()
 
 
-## .info()
-## Get info as text
-buffer = StringIO()
-df.info(buf=buffer)
-info_text = buffer.getvalue()
+# ## Image, title and Markdown subheader
+# st.image('../Images/money_tree.jpg')
+# st.title('Loan Approval Dataset')
+# st.markdown("Data gathered from [Kaggle](https://www.kaggle.com/datasets/architsharma01/loan-approval-prediction-dataset)")
 
-#Display .info() with button trigger
-st.sidebar.subheader('Show Dataframe Summary')
-summary_text = st.sidebar.button('Summary Text')
-if summary_text:
-    st.text(info_text)
-
-## Descriptive Statistics subheader
-st.sidebar.subheader('Show Descriptive Statistics')
-
-## Button for Statistics
-show_stats = st.sidebar.button('Descriptive Statistics')
-if show_stats:
-    describe = df.describe()
-    st.dataframe(describe)
-
-## Eda Plots subheader
-st.sidebar.subheader('Explore a Column')
-
-## Columns for EDA
-columns = df.columns
-target = 'loan_status'
-features = [col for col in columns if col != target]
+# ## Display DataFrame
+# st.header('Loan Approval DataFrame')
+# st.dataframe(df)
 
 
-## selectbox for columns
-eda_column = st.sidebar.selectbox('Column to Explore', columns, index=None)
+# ## .info()
+# ## Get info as text
+# buffer = StringIO()
+# df.info(buf=buffer)
+# info_text = buffer.getvalue()
 
-## Conditional: if column was chosen
-if eda_column:
-    ## Check if column is object or numeric and use appropriate plot function
-    if df[eda_column].dtype == 'object':
-        fig = fn.explore_categorical(df, eda_column)
-    else:
-        fig = fn.explore_numeric(df, eda_column)
+# #Display .info() with button trigger
+# st.sidebar.subheader('Show Dataframe Summary')
+# summary_text = st.sidebar.button('Summary Text')
+# if summary_text:
+#     st.text(info_text)
 
-    ## Show plot
-    st.subheader(f'Display Descriptive Plots for {eda_column}')
-    st.pyplot(fig)
+# ## Descriptive Statistics subheader
+# st.sidebar.subheader('Show Descriptive Statistics')
 
-## Select box for features vs target
-feature = st.sidebar.selectbox('Compare Feature to Target', features, index=None)
+# ## Button for Statistics
+# show_stats = st.sidebar.button('Descriptive Statistics')
+# if show_stats:
+#     describe = df.describe()
+#     st.dataframe(describe)
 
-## Conditional: if feature was chosen
-if feature:
-    ## Check if feature is numeric or object
-    if df[feature].dtype == 'object':
-        comparison = df.groupby('loan_status').count()
-        title = f'Count of {feature} by {target}'
-    else:
-        comparison = df.groupby('loan_status').mean()
-        title = f'Mean {feature} by {target}'
+# ## Eda Plots subheader
+# st.sidebar.subheader('Explore a Column')
 
-    ## Display appropriate comparison
-    pfig = px.bar(comparison, y=feature, title=title)
-    st.plotly_chart(pfig)
+# ## Columns for EDA
+# columns = df.columns
+# target = 'loan_status'
+# features = [col for col in columns if col != target]
 
 
-# Keras TextVectorization Layer
+# ## selectbox for columns
+# eda_column = st.sidebar.selectbox('Column to Explore', columns, index=None)
 
-import tensorflow as tf
-import numpy as np
-# Then Set Random Seeds
-tf.keras.utils.set_random_seed(42)
-tf.random.set_seed(42)
-np.random.seed(42)
-# Then run the Enable Deterministic Operations Function
-tf.config.experimental.enable_op_determinism()
+# ## Conditional: if column was chosen
+# if eda_column:
+#     ## Check if column is object or numeric and use appropriate plot function
+#     if df[eda_column].dtype == 'object':
+#         fig = fn.explore_categorical(df, eda_column)
+#     else:
+#         fig = fn.explore_numeric(df, eda_column)
 
-from tensorflow.keras.layers import TextVectorization
-from tensorflow.keras import layers
-from tensorflow.keras import optimizers
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import make_pipeline, Pipeline
-from sklearn.model_selection import GridSearchCV
-from imblearn.under_sampling import RandomUnderSampler
-from sklearn.preprocessing import LabelEncoder
-from sklearn import set_config
-set_config(transform_output='pandas')
-pd.set_option('display.max_colwidth', 250)
+#     ## Show plot
+#     st.subheader(f'Display Descriptive Plots for {eda_column}')
+#     st.pyplot(fig)
 
-# Create the TextVectorization layer
-count_vectorizer = tf.keras.layers.TextVectorization(
-    standardize="lower_and_strip_punctuation",
-    output_mode="count"
+# ## Select box for features vs target
+# feature = st.sidebar.selectbox('Compare Feature to Target', features, index=None)
 
-# Custom Functions and Imports from Google Doc
-###Imports
-import re
-import matplotlib.pyplot as plt
-import spacy
-import pandas as pd
-import matplotlib as mpl
-import seaborn as sns
-import numpy as np
-import nltk
-import itertools
+# ## Conditional: if feature was chosen
+# if feature:
+#     ## Check if feature is numeric or object
+#     if df[feature].dtype == 'object':
+#         comparison = df.groupby('loan_status').count()
+#         title = f'Count of {feature} by {target}'
+#     else:
+#         comparison = df.groupby('loan_status').mean()
+#         title = f'Mean {feature} by {target}'
+
+#     ## Display appropriate comparison
+#     pfig = px.bar(comparison, y=feature, title=title)
+#     st.plotly_chart(pfig)
 
 
-from wordcloud import WordCloud
-from wordcloud import STOPWORDS
-from nltk.tokenize import word_tokenize
-from nltk.tokenize import TweetTokenizer
-from nltk import ngrams
-from nltk.probability import FreqDist
-from nltk.stem import PorterStemmer
-from nltk.stem import WordNetLemmatizer
+
 
 ### Custom Fuctions
-​def batch_preprocess_texts(
+
+def batch_preprocess_texts(
     texts,
     nlp=None,
     remove_stopwords=True,
@@ -862,32 +836,32 @@ def get_ngram_measures_finder(tokens, ngrams=2, measure='raw_freq', top_n=None, 
 pd.set_option('display.max_colwidth', 250)
 
 
-# Preprocessing
-def preprocess_doc(doc, remove_stopwords=True, remove_punct=True, use_lemmas=False):
-“”” Temporary Function - for Education Purposes (we will make something better below)
-“””
-tokens = [ ]
-for token in doc:
-	
-# Check if it should remove stopwords and if token is a stopword
-		if (remove_stopwords == True) and (token.is_stop == True):
-		# Continue the loop with the next token
-		continue 
-	
-# Check if it should remove stopwords and if token is a stopword
-		if (remove_stopwords == True) and (token.is_punt == True):
-		continue
+# # Preprocessing
+# def preprocess_doc(doc, remove_stopwords=True, remove_punct=True, use_lemmas=False):
+#     #Temporary Function - for Education Purposes (we will make something better below)
 
-		# Check if it should remove stopwords and if token is a stopword
-		if (remove_stopwords == True) and (token.is_space == True):
-		continue 
-	
-# Determine final form of output list of tokens/lemmas
-		if use_lemmas:
-			tokens.append(token.lemma_.lower())
-		else:
-			tokens.append(token.text.lower())
-return tokens
+#     tokens = [ ]
+#     for token in doc:
+    	
+#     # Check if it should remove stopwords and if token is a stopword
+#         	if (remove_stopwords == True) and (token.is_stop == True):
+#             # Continue the loop with the next token
+#         		continue 
+    	
+#             # Check if it should remove stopwords and if token is a stopword
+#         	if (remove_stopwords == True) and (token.is_punt == True):
+#         		continue
+    
+#     		# Check if it should remove stopwords and if token is a stopword
+#         	if (remove_stopwords == True) and (token.is_space == True):
+#         		continue 
+    	
+#     # Determine final form of output list of tokens/lemmas
+#             if use_lemmas:
+#     			tokens.append(token.lemma_.lower())
+#     		else:
+#     			tokens.append(token.text.lower())
+#     return tokens
 
 # Preprocessing Pipeline
 # Disable parser and ner
@@ -895,111 +869,59 @@ nlp_light = spacy.load("en_core_web_sm", disable=['parser','ner'])
 # Print active components
 nlp_light.pipe_names
 
-Additional Arguments:
-def batch_preprocess_texts(
-    texts,
-    nlp=None,
-    remove_stopwords=True,
-    remove_punct=True,
-    use_lemmas=False,
-    disable=["ner"],
-    batch_size=50,
-    n_process=-1,
-):
-    """Efficiently preprocess a collection of texts using nlp.pipe()
-    Args:
-        texts (collection of strings): collection of texts to process (e.g. df['text'])
-        nlp (spacy pipe), optional): Spacy nlp pipe. Defaults to None; if None, it creates a default 'en_core_web_sm' pipe.
-        remove_stopwords (bool, optional): Controls stopword removal. Defaults to True.
-        remove_punct (bool, optional): Controls punctuation removal. Defaults to True.
-        use_lemmas (bool, optional): lemmatize tokens. Defaults to False.
-        disable (list of strings, optional): named pipeline elements to disable. Defaults to ["ner"]: Used with nlp.pipe(disable=disable)
-        batch_size (int, optional): Number of texts to process in a batch. Defaults to 50.
-        n_process (int, optional): Number of CPU processors to use. Defaults to -1 (meaning all CPU cores).
-    Returns:
-        list of tokens
-    """
+# # Additional Arguments:
+# def batch_preprocess_texts(
+#     texts,
+#     nlp=None,
+#     remove_stopwords=True,
+#     remove_punct=True,
+#     use_lemmas=False,
+#     disable=["ner"],
+#     batch_size=50,
+#     n_process=-1,
+# ):
+#     """Efficiently preprocess a collection of texts using nlp.pipe()
+#     Args:
+#         texts (collection of strings): collection of texts to process (e.g. df['text'])
+#         nlp (spacy pipe), optional): Spacy nlp pipe. Defaults to None; if None, it creates a default 'en_core_web_sm' pipe.
+#         remove_stopwords (bool, optional): Controls stopword removal. Defaults to True.
+#         remove_punct (bool, optional): Controls punctuation removal. Defaults to True.
+#         use_lemmas (bool, optional): lemmatize tokens. Defaults to False.
+#         disable (list of strings, optional): named pipeline elements to disable. Defaults to ["ner"]: Used with nlp.pipe(disable=disable)
+#         batch_size (int, optional): Number of texts to process in a batch. Defaults to 50.
+#         n_process (int, optional): Number of CPU processors to use. Defaults to -1 (meaning all CPU cores).
+#     Returns:
+#         list of tokens
+#     """
   
-# from tqdm.notebook import tqdm
-    from tqdm import tqdm
-    if nlp is None:
-        nlp = spacy.load("en_core_web_sm")
-    processed_texts = []
-    for doc in tqdm(nlp.pipe(texts, disable=disable, batch_size=batch_size, n_process=n_process)):
-        tokens = []
-        for token in doc:
-            # Check if should remove stopwords and if token is stopword
-            if (remove_stopwords == True) and (token.is_stop == True):
-                # Continue the loop with the next token
-                continue
-            # Check if should remove stopwords and if token is stopword
-            if (remove_punct == True) and (token.is_punct == True):
-                continue
-            # Check if should remove stopwords and if token is stopword
-            if (remove_punct == True) and (token.is_space == True):
-                continue
+# # from tqdm.notebook import tqdm
+#     from tqdm import tqdm
+#     if nlp is None:
+#         nlp = spacy.load("en_core_web_sm")
+#     processed_texts = []
+#     for doc in tqdm(nlp.pipe(texts, disable=disable, batch_size=batch_size, n_process=n_process)):
+#         tokens = []
+#         for token in doc:
+#             # Check if should remove stopwords and if token is stopword
+#             if (remove_stopwords == True) and (token.is_stop == True):
+#                 # Continue the loop with the next token
+#                 continue
+#             # Check if should remove stopwords and if token is stopword
+#             if (remove_punct == True) and (token.is_punct == True):
+#                 continue
+#             # Check if should remove stopwords and if token is stopword
+#             if (remove_punct == True) and (token.is_space == True):
+#                 continue
             
-            ## Determine final form of output list of tokens/lemmas
-            if use_lemmas:
-                tokens.append(token.lemma_.lower())
-            else:
-                tokens.append(token.text.lower())
-        processed_texts.append(tokens)
-    return processed_texts
+#             ## Determine final form of output list of tokens/lemmas
+#             if use_lemmas:
+#                 tokens.append(token.lemma_.lower())
+#             else:
+#                 tokens.append(token.text.lower())
+#         processed_texts.append(tokens)
+#     return processed_texts
 
 ##2 separate word clouds with subplots
 # Make word clouds of raw text
 # Create an instance of a WordCloud and use the generate method
-low_cloud = WordCloud(random_state = 42,
-                      width = 800,
-                      height = 1000,
-                      min_word_length = 2, colormap="Reds",
-                     ).generate(low_reviews_text)
-high_cloud = WordCloud(random_state = 42,
-                       width = 800,
-                       height= 1000,
-                       min_word_length = 2,
-                       colormap="Blues",
-                      ).generate(high_reviews_text)
-# Plot the wordclouds side by side
-fig, axes = plt.subplots(ncols=2, figsize=(10, 7))
-axes[0].imshow(low_cloud, interpolation='bilinear')
-axes[0].set_title("Name of plot")
-axes[1].imshow(high_cloud, interpolation='bilinear')
-axes[1].set_title("Name of plot: example:<High Ratings>")
-[ax.axis('off') for ax in axes]
-fig.tight_layout();
-fig.suptitle('Word Clouds - Raw Reviews', fontsize=20, y=1.05);
-
-##Word Clouds of Tokenized Text
-##We will define a single string for each group using the joined tokens.
-# Make a single giant string with entire group of 5 star tokens
-high_reviews_tokens = " ".join( reviews.loc[filter_high, 'tokens-joined'])
-# Make a single giant string with entire group of 1 star tokens
-low_reviews_tokens = " ".join( reviews.loc[filter_low, 'tokens-joined'])
-
-##Once our groups are defined, we will make a word cloud using similar code as above.
-
-# Make word clouds of processed tokens
-# Create an instance of a WordCloud and use the generate method
-low_cloud = WordCloud(random_state = 42,
-                      width = 800,
-                      height = 1000,
-                      min_word_length = 2, colormap="Reds",
-                     ).generate(low_reviews_tokens)
-high_cloud = WordCloud(random_state = 42,
-                       width = 800,
-                       height= 1000,
-                       min_word_length = 2,
-                       colormap="Blues",
-                      ).generate(high_reviews_tokens)
-
-# Plot the wordclouds side by side
-fig, axes = plt.subplots(ncols=2, figsize=(10, 7))
-axes[0].imshow(low_cloud, interpolation='bilinear')
-axes[0].set_title("Low Ratings")
-axes[1].imshow(high_cloud, interpolation='bilinear')
-axes[1].set_title("High Ratings")
-[ax.axis('off') for ax in axes]
-fig.tight_layout();
-fig.suptitle('Word Clouds - Tokens', fontsize=20, y=1.05);
+# 
